@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
+import { getTimingState, getTimingClass, formatElapsed } from '@/lib/utils'
 import type { Tab, MenuItem, Order, OrderItem } from '@/types/database'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -12,7 +13,7 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog'
 import { toast } from '@/components/ui/use-toast'
-import { Plus, Minus, Send, X, ChefHat, LogOut } from 'lucide-react'
+import { Plus, Minus, Send, X, ChefHat, LogOut, Clock, CheckCircle, AlertCircle } from 'lucide-react'
 
 type OrderDraftItem = {
   menuItem: MenuItem
@@ -48,6 +49,18 @@ export function FrontOfHouse() {
   const [showAddMenuItem, setShowAddMenuItem] = useState(false)
   const [newMenuItem, setNewMenuItem] = useState({ name: '', price: '', category: 'Food' })
 
+  // Timer for updating elapsed time (FR-008)
+  const [now, setNow] = useState(Date.now())
+
+  // Track acknowledged order completions (for "ready" badge)
+  const [acknowledgedOrders, setAcknowledgedOrders] = useState<Set<string>>(new Set())
+
+  // Ref to track selected tab ID for use in subscription callback
+  const selectedTabIdRef = useRef<string | null>(null)
+  useEffect(() => {
+    selectedTabIdRef.current = selectedTab?.id ?? null
+  }, [selectedTab])
+
   // Load tabs and menu items on mount
   useEffect(() => {
     loadTabs()
@@ -61,14 +74,9 @@ export function FrontOfHouse() {
         { event: 'UPDATE', schema: 'public', table: 'orders', filter: 'status=eq.complete' },
         (payload) => {
           const order = payload.new as Order
-          // Find the tab name for this order
-          const tab = tabs.find(t => t.orders.some(o => o.id === order.id))
-          if (tab) {
-            toast({
-              title: 'Order Ready!',
-              description: `Order for "${tab.name}" is ready to serve`,
-              variant: 'success',
-            })
+          // Auto-acknowledge if this order belongs to the currently selected tab
+          if (order.tab_id === selectedTabIdRef.current) {
+            setAcknowledgedOrders(prev => new Set(prev).add(order.id))
           }
           loadTabs() // Refresh tabs to update order status
         }
@@ -80,6 +88,12 @@ export function FrontOfHouse() {
     }
   }, [])
 
+  // Update elapsed time every 30 seconds (FR-008)
+  useEffect(() => {
+    const interval = setInterval(() => setNow(Date.now()), 30000)
+    return () => clearInterval(interval)
+  }, [])
+
   // Update menuByCategory when menuItems change
   useEffect(() => {
     const grouped = menuItems.reduce((acc, item) => {
@@ -89,6 +103,16 @@ export function FrontOfHouse() {
     }, {} as Record<string, MenuItem[]>)
     setMenuByCategory(grouped)
   }, [menuItems])
+
+  // Sync selectedTab with updated tabs data
+  useEffect(() => {
+    if (selectedTab) {
+      const updatedTab = tabs.find(t => t.id === selectedTab.id)
+      if (updatedTab) {
+        setSelectedTab(updatedTab)
+      }
+    }
+  }, [tabs])
 
   async function loadTabs() {
     const { data, error } = await supabase
@@ -267,6 +291,56 @@ export function FrontOfHouse() {
 
   const orderTotal = orderDraft.reduce((sum, d) => sum + d.menuItem.price * d.quantity, 0)
 
+  // Calculate tab total from all orders (FR-002)
+  function calculateTabTotal(tab: TabWithOrders): number {
+    return tab.orders.reduce((total, order) =>
+      total + order.order_items.reduce((orderSum, item) =>
+        orderSum + item.quantity * item.price_at_order, 0
+      ), 0
+    )
+  }
+
+  // Calculate single order subtotal (FR-003)
+  function calculateOrderSubtotal(order: OrderWithDetails): number {
+    return order.order_items.reduce((sum, item) =>
+      sum + item.quantity * item.price_at_order, 0
+    )
+  }
+
+  // Get status badge styling (FR-001)
+  function getStatusBadge(status: Order['status']) {
+    switch (status) {
+      case 'complete':
+        return { icon: CheckCircle, className: 'text-green-600 bg-green-100', label: 'Complete' }
+      case 'editing':
+        return { icon: AlertCircle, className: 'text-yellow-600 bg-yellow-100', label: 'Editing' }
+      default:
+        return { icon: Clock, className: 'text-blue-600 bg-blue-100', label: 'In Progress' }
+    }
+  }
+
+  // Count unacknowledged ready orders for a tab
+  function getReadyCount(tab: TabWithOrders): number {
+    return tab.orders.filter(o =>
+      o.status === 'complete' && !acknowledgedOrders.has(o.id)
+    ).length
+  }
+
+  // Select tab and acknowledge its completed orders
+  function selectTab(tab: TabWithOrders) {
+    setSelectedTab(tab)
+    const completeOrderIds = tab.orders
+      .filter(o => o.status === 'complete')
+      .map(o => o.id)
+    if (completeOrderIds.length > 0) {
+      setAcknowledgedOrders(prev => {
+        const next = new Set(prev)
+        completeOrderIds.forEach(id => next.add(id))
+        return next
+      })
+    }
+  }
+
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
@@ -310,26 +384,40 @@ export function FrontOfHouse() {
             {tabs.length === 0 && (
               <p className="text-sm text-muted-foreground">No open tabs</p>
             )}
-            {tabs.map(tab => (
-              <Card
-                key={tab.id}
-                className={`cursor-pointer transition-colors ${
-                  selectedTab?.id === tab.id ? 'border-primary bg-accent' : 'hover:bg-accent/50'
-                }`}
-                onClick={() => setSelectedTab(tab)}
-              >
-                <CardContent className="p-3">
-                  <div className="font-medium">{tab.name}</div>
-                  <div className="text-xs text-muted-foreground">
-                    {tab.orders.length} order{tab.orders.length !== 1 ? 's' : ''}
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
+            {tabs.map(tab => {
+              const tabTotal = calculateTabTotal(tab)
+              const readyCount = getReadyCount(tab)
+              return (
+                <Card
+                  key={tab.id}
+                  className={`cursor-pointer transition-colors ${
+                    selectedTab?.id === tab.id ? 'border-primary bg-accent' : 'hover:bg-accent/50'
+                  }`}
+                  onClick={() => selectTab(tab)}
+                >
+                  <CardContent className="p-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium">{tab.name}</span>
+                        {readyCount > 0 && (
+                          <span className="px-1.5 py-0.5 text-xs font-semibold bg-green-500 text-white rounded-full">
+                            {readyCount} ready
+                          </span>
+                        )}
+                      </div>
+                      <div className="font-semibold text-sm">${tabTotal.toFixed(2)}</div>
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      {tab.orders.length} order{tab.orders.length !== 1 ? 's' : ''}
+                    </div>
+                  </CardContent>
+                </Card>
+              )
+            })}
           </div>
         </div>
 
-        {/* Center: Menu */}
+        {/* Center: Menu + Tab Details */}
         <div className="flex-1 p-4 overflow-y-auto">
           {selectedTab ? (
             <>
@@ -340,6 +428,7 @@ export function FrontOfHouse() {
                 </Button>
               </div>
 
+              {/* Menu grid */}
               {Object.entries(menuByCategory).map(([category, items]) => (
                 <div key={category} className="mb-6">
                   <h3 className="text-sm font-medium text-muted-foreground mb-2">{category}</h3>
@@ -371,85 +460,152 @@ export function FrontOfHouse() {
           )}
         </div>
 
-        {/* Right: Order Draft */}
-        <div className="w-80 border-l p-4 flex flex-col">
-          <h2 className="font-semibold mb-3">Current Order</h2>
+        {/* Right: Order Draft (2/3) + Tab Orders (1/3) */}
+        <div className="w-80 border-l flex flex-col">
+          {/* Upper 2/3: Current Order */}
+          <div className="h-2/3 p-4 flex flex-col border-b">
+            <h2 className="font-semibold mb-3">Current Order</h2>
 
-          {orderDraft.length === 0 ? (
-            <p className="text-sm text-muted-foreground flex-1">No items yet</p>
-          ) : (
-            <div className="flex-1 overflow-y-auto space-y-3">
-              {orderDraft.map(item => (
-                <Card key={item.menuItem.id}>
-                  <CardContent className="p-3">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="font-medium">{item.menuItem.name}</span>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-6 w-6"
-                        onClick={() => removeFromOrder(item.menuItem.id)}
-                      >
-                        <X className="w-3 h-3" />
-                      </Button>
-                    </div>
-                    <div className="flex items-center gap-2 mb-2">
-                      <Button
-                        variant="outline"
-                        size="icon"
-                        className="h-7 w-7"
-                        onClick={() => updateQuantity(item.menuItem.id, -1)}
-                      >
-                        <Minus className="w-3 h-3" />
-                      </Button>
-                      <span className="w-8 text-center">{item.quantity}</span>
-                      <Button
-                        variant="outline"
-                        size="icon"
-                        className="h-7 w-7"
-                        onClick={() => updateQuantity(item.menuItem.id, 1)}
-                      >
-                        <Plus className="w-3 h-3" />
-                      </Button>
-                      <span className="ml-auto text-sm">
-                        ${(item.menuItem.price * item.quantity).toFixed(2)}
-                      </span>
-                    </div>
-                    <Input
-                      placeholder="Special requests..."
-                      value={item.notes}
-                      onChange={e => updateItemNotes(item.menuItem.id, e.target.value)}
-                      className="text-sm h-8"
-                    />
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          )}
-
-          {/* Order notes and submit */}
-          {orderDraft.length > 0 && (
-            <div className="border-t pt-4 mt-4 space-y-3">
-              <Input
-                placeholder="Order notes (optional)..."
-                value={orderNotes}
-                onChange={e => setOrderNotes(e.target.value)}
-              />
-              <div className="flex items-center justify-between text-lg font-semibold">
-                <span>Total:</span>
-                <span>${orderTotal.toFixed(2)}</span>
+            {orderDraft.length === 0 ? (
+              <p className="text-sm text-muted-foreground flex-1">No items yet</p>
+            ) : (
+              <div className="flex-1 overflow-y-auto space-y-3">
+                {orderDraft.map(item => (
+                  <Card key={item.menuItem.id}>
+                    <CardContent className="p-3">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="font-medium">{item.menuItem.name}</span>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-6 w-6"
+                          onClick={() => removeFromOrder(item.menuItem.id)}
+                        >
+                          <X className="w-3 h-3" />
+                        </Button>
+                      </div>
+                      <div className="flex items-center gap-2 mb-2">
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          className="h-7 w-7"
+                          onClick={() => updateQuantity(item.menuItem.id, -1)}
+                        >
+                          <Minus className="w-3 h-3" />
+                        </Button>
+                        <span className="w-8 text-center">{item.quantity}</span>
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          className="h-7 w-7"
+                          onClick={() => updateQuantity(item.menuItem.id, 1)}
+                        >
+                          <Plus className="w-3 h-3" />
+                        </Button>
+                        <span className="ml-auto text-sm">
+                          ${(item.menuItem.price * item.quantity).toFixed(2)}
+                        </span>
+                      </div>
+                      <Input
+                        placeholder="Special requests..."
+                        value={item.notes}
+                        onChange={e => updateItemNotes(item.menuItem.id, e.target.value)}
+                        className="text-sm h-8"
+                      />
+                    </CardContent>
+                  </Card>
+                ))}
               </div>
-              <Button
-                className="w-full"
-                size="lg"
-                onClick={submitOrder}
-                disabled={submittingOrder || !selectedTab}
-              >
-                <Send className="w-4 h-4 mr-2" />
-                {submittingOrder ? 'Sending...' : 'Send to Kitchen'}
-              </Button>
-            </div>
-          )}
+            )}
+
+            {/* Order notes and submit */}
+            {orderDraft.length > 0 && (
+              <div className="border-t pt-4 mt-4 space-y-3">
+                <Input
+                  placeholder="Order notes (optional)..."
+                  value={orderNotes}
+                  onChange={e => setOrderNotes(e.target.value)}
+                />
+                <div className="flex items-center justify-between text-lg font-semibold">
+                  <span>Total:</span>
+                  <span>${orderTotal.toFixed(2)}</span>
+                </div>
+                <Button
+                  className="w-full"
+                  size="lg"
+                  onClick={submitOrder}
+                  disabled={submittingOrder || !selectedTab}
+                >
+                  <Send className="w-4 h-4 mr-2" />
+                  {submittingOrder ? 'Sending...' : 'Send to Kitchen'}
+                </Button>
+              </div>
+            )}
+          </div>
+
+          {/* Lower 1/3: Tab Orders */}
+          <div className="h-1/3 p-4 overflow-y-auto bg-muted/30">
+            <h2 className="font-semibold mb-3">Tab Orders</h2>
+            {selectedTab && selectedTab.orders.length > 0 ? (
+              <div className="space-y-2">
+                {selectedTab.orders.map(order => {
+                  const statusBadge = getStatusBadge(order.status)
+                  const StatusIcon = statusBadge.icon
+                  const orderSubtotal = calculateOrderSubtotal(order)
+                  const isActive = order.status !== 'complete'
+                  const timingState = isActive ? getTimingState(order.created_at) : 'normal'
+                  const timingClass = isActive ? getTimingClass(timingState) : ''
+
+                  return (
+                    <Card key={order.id} className="bg-background">
+                      <CardContent className="p-2">
+                        {/* Order header with status and timing */}
+                        <div className="flex items-center justify-between mb-1">
+                          <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-xs font-medium ${statusBadge.className}`}>
+                            <StatusIcon className="w-3 h-3" />
+                            {statusBadge.label}
+                          </span>
+                          {isActive ? (
+                            <span className={`text-xs ${timingClass}`}>
+                              {formatElapsed(order.created_at, now)}
+                            </span>
+                          ) : order.completed_at && (
+                            <span className="text-xs text-muted-foreground">
+                              {formatElapsed(order.completed_at, now)}
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Order items (compact) */}
+                        <div className="text-xs text-muted-foreground">
+                          {order.order_items.map(item => (
+                            <span key={item.id} className="mr-2">
+                              {item.quantity}x {item.menu_item.name}
+                            </span>
+                          ))}
+                        </div>
+
+                        {/* Order subtotal */}
+                        <div className="text-right text-xs font-medium mt-1">
+                          ${orderSubtotal.toFixed(2)}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )
+                })}
+
+                {/* Grand total */}
+                <div className="flex justify-between pt-2 border-t text-sm font-bold">
+                  <span>Total</span>
+                  <span>${calculateTabTotal(selectedTab).toFixed(2)}</span>
+                </div>
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                {selectedTab ? 'No orders yet' : 'Select a tab'}
+              </p>
+            )}
+          </div>
         </div>
       </div>
 

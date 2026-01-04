@@ -3,6 +3,8 @@
 Auto-generated from all feature plans. Last updated: 2026-01-03
 
 ## Active Technologies
+- TypeScript 5.x + React 18+, Tailwind CSS, shadcn/ui, Supabase (existing stack) (002-order-status-visibility)
+- Supabase PostgreSQL (existing schema - no changes needed) (002-order-status-visibility)
 
 - TypeScript 5.x (React frontend) + React 18+, Supabase JS Client, React Router (001-bar-kitchen-orders)
 
@@ -22,6 +24,7 @@ npm test && npm run lint
 TypeScript 5.x (React frontend): Follow standard conventions
 
 ## Recent Changes
+- 002-order-status-visibility: Added TypeScript 5.x + React 18+, Tailwind CSS, shadcn/ui, Supabase (existing stack)
 
 - 001-bar-kitchen-orders: Added TypeScript 5.x (React frontend) + React 18+, Supabase JS Client, React Router
 
