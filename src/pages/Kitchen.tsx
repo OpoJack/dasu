@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
+import { getTimingState, getTimingClass, formatElapsed } from '@/lib/utils'
 import type { Order, OrderItem, MenuItem, Tab } from '@/types/database'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -149,21 +150,10 @@ export function Kitchen() {
     toast({ title: 'Order completed!' })
   }
 
-  function formatElapsed(createdAt: string): string {
-    const seconds = Math.floor((now - new Date(createdAt).getTime()) / 1000)
-    if (seconds < 60) return 'Just now'
-    const minutes = Math.floor(seconds / 60)
-    if (minutes < 60) return `${minutes}m ago`
-    const hours = Math.floor(minutes / 60)
-    return `${hours}h ${minutes % 60}m ago`
-  }
-
+  // Use shared timing utilities with consistent 6/12 min thresholds (FR-006)
   function getElapsedClass(createdAt: string): string {
-    const minutes = Math.floor((now - new Date(createdAt).getTime()) / 60000)
-    if (minutes >= 15) return 'text-red-500 font-bold'
-    if (minutes >= 10) return 'text-orange-500 font-semibold'
-    if (minutes >= 5) return 'text-yellow-600'
-    return 'text-muted-foreground'
+    const state = getTimingState(createdAt)
+    return getTimingClass(state)
   }
 
   return (
@@ -217,7 +207,7 @@ export function Kitchen() {
                   <div className="flex items-center justify-between">
                     <CardTitle className="text-lg text-white">{order.tab.name}</CardTitle>
                     <span className={`text-sm ${getElapsedClass(order.created_at)}`}>
-                      {formatElapsed(order.created_at)}
+                      {formatElapsed(order.created_at, now)}
                     </span>
                   </div>
                   {order.status === 'editing' && (
