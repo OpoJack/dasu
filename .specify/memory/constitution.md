@@ -1,50 +1,97 @@
-# [PROJECT_NAME] Constitution
-<!-- Example: Spec Constitution, TaskFlow Constitution, etc. -->
+<!--
+  SYNC IMPACT REPORT
+  ==================
+  Version change: 0.0.0 (template) → 1.0.0 (initial ratification)
+
+  Modified principles: N/A (first ratification)
+
+  Added sections:
+    - Core Principles (8 principles defined)
+    - Technology Stack (fixed dependencies)
+    - Development Workflow (ship-first approach)
+    - Governance (compliance rules)
+
+  Removed sections: None (template placeholders replaced)
+
+  Templates requiring updates:
+    ✅ plan-template.md - Constitution Check section compatible
+    ✅ spec-template.md - No changes needed (tech-agnostic)
+    ✅ tasks-template.md - No changes needed (structure compatible)
+
+  Follow-up TODOs: None
+-->
+
+# Dasu Constitution
 
 ## Core Principles
 
-### [PRINCIPLE_1_NAME]
-<!-- Example: I. Library-First -->
-[PRINCIPLE_1_DESCRIPTION]
-<!-- Example: Every feature starts as a standalone library; Libraries must be self-contained, independently testable, documented; Clear purpose required - no organizational-only libraries -->
+### I. Simplicity Over Scalability
 
-### [PRINCIPLE_2_NAME]
-<!-- Example: II. CLI Interface -->
-[PRINCIPLE_2_DESCRIPTION]
-<!-- Example: Every library exposes functionality via CLI; Text in/out protocol: stdin/args → stdout, errors → stderr; Support JSON + human-readable formats -->
+This application serves one bar for one night. Every decision MUST favor the fastest path to a working product over architectural elegance or future-proofing. Do not design for hypothetical scale, multi-tenancy, or features that might be needed later.
 
-### [PRINCIPLE_3_NAME]
-<!-- Example: III. Test-First (NON-NEGOTIABLE) -->
-[PRINCIPLE_3_DESCRIPTION]
-<!-- Example: TDD mandatory: Tests written → User approved → Tests fail → Then implement; Red-Green-Refactor cycle strictly enforced -->
+### II. Minimal Dependencies
 
-### [PRINCIPLE_4_NAME]
-<!-- Example: IV. Integration Testing -->
-[PRINCIPLE_4_DESCRIPTION]
-<!-- Example: Focus areas requiring integration tests: New library contract tests, Contract changes, Inter-service communication, Shared schemas -->
+The stack is: **Vite, React, TypeScript, Tailwind, shadcn/ui, and Supabase**. Do not introduce additional libraries unless absolutely necessary to deliver a feature. When in doubt, use what's already there. Every new dependency requires explicit justification.
 
-### [PRINCIPLE_5_NAME]
-<!-- Example: V. Observability, VI. Versioning & Breaking Changes, VII. Simplicity -->
-[PRINCIPLE_5_DESCRIPTION]
-<!-- Example: Text I/O ensures debuggability; Structured logging required; Or: MAJOR.MINOR.BUILD format; Or: Start simple, YAGNI principles -->
+### III. No Custom Backend
 
-## [SECTION_2_NAME]
-<!-- Example: Additional Constraints, Security Requirements, Performance Standards, etc. -->
+All data persistence, querying, and real-time functionality MUST go through Supabase. Do not spin up a separate API server, serverless functions (beyond Supabase Edge Functions if needed), or any middleware layer. The frontend talks directly to Supabase.
 
-[SECTION_2_CONTENT]
-<!-- Example: Technology stack requirements, compliance standards, deployment policies, etc. -->
+### IV. Colocate Logic With UI
 
-## [SECTION_3_NAME]
-<!-- Example: Development Workflow, Review Process, Quality Gates, etc. -->
+Keep components self-contained. Data fetching and subscriptions live in the components that need them. Do not prematurely abstract into custom hooks or context providers unless duplication becomes painful (3+ identical usages). Prefer copy-paste over wrong abstraction.
 
-[SECTION_3_CONTENT]
-<!-- Example: Code review requirements, testing gates, deployment approval process, etc. -->
+### V. Supabase As Source of Truth
+
+The database is the source of truth for all state. Subscribe to changes and render what comes back. Avoid duplicating server state in client-side stores (no Redux, Zustand, or similar for data that lives in Supabase). Local component state is acceptable for UI-only concerns (modals, form inputs, loading states).
+
+### VI. Type Everything
+
+Use TypeScript for all code. Define types for database rows (generate from Supabase schema when possible) and use them consistently across components. No `any` types unless explicitly unavoidable and commented with rationale.
+
+### VII. Ship Then Polish
+
+Get each feature working end-to-end before refining the UI or handling edge cases. A working ugly screen beats a beautiful broken one. Priorities: functionality → correctness → usability → aesthetics.
+
+### VIII. Fail Visibly
+
+When something goes wrong—a failed insert, a dropped subscription, a network error—show the user an error. Do not swallow failures silently. Use toast notifications, inline error states, or explicit error boundaries. The user should always know when something didn't work.
+
+## Technology Stack
+
+**Fixed dependencies (do not deviate without constitution amendment):**
+
+| Layer | Technology | Version |
+|-------|------------|---------|
+| Build | Vite | Latest stable |
+| UI Framework | React | 18+ |
+| Language | TypeScript | 5.x |
+| Styling | Tailwind CSS | 3.x |
+| Components | shadcn/ui | Latest |
+| Backend/DB | Supabase | Latest |
+
+**Prohibited without explicit justification:**
+- State management libraries (Redux, Zustand, Jotai, etc.)
+- Additional CSS frameworks or preprocessors
+- Custom API servers or serverless functions (outside Supabase)
+- ORMs or query builders (use Supabase client directly)
+- Additional testing frameworks beyond what Vite provides
+
+## Development Workflow
+
+1. **Feature implementation order**: Working end-to-end → Edge cases → Polish
+2. **Code organization**: Components own their data fetching; extract only when duplication is painful
+3. **Error handling**: Every async operation MUST have visible error handling
+4. **Type safety**: Generate database types from Supabase; no untyped data flows
 
 ## Governance
-<!-- Example: Constitution supersedes all other practices; Amendments require documentation, approval, migration plan -->
 
-[GOVERNANCE_RULES]
-<!-- Example: All PRs/reviews must verify compliance; Complexity must be justified; Use [GUIDANCE_FILE] for runtime development guidance -->
+This constitution supersedes all other development practices for this project. Amendments require:
 
-**Version**: [CONSTITUTION_VERSION] | **Ratified**: [RATIFICATION_DATE] | **Last Amended**: [LAST_AMENDED_DATE]
-<!-- Example: Version: 2.1.1 | Ratified: 2025-06-13 | Last Amended: 2025-07-16 -->
+1. Explicit documentation of why the current principle is insufficient
+2. Update to this file with version increment
+3. Propagation check for affected specs and plans
+
+All code contributions MUST verify compliance with these principles. Complexity beyond these constraints MUST be justified in the Complexity Tracking section of the relevant plan.md.
+
+**Version**: 1.0.0 | **Ratified**: 2026-01-03 | **Last Amended**: 2026-01-03
