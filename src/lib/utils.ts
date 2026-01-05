@@ -23,11 +23,22 @@ export function getTimingState(createdAt: string): TimingState {
 }
 
 // Get Tailwind classes for timing state (FR-006)
-export function getTimingClass(state: TimingState): string {
-  switch (state) {
-    case 'urgent': return 'text-red-500 font-bold'
-    case 'warning': return 'text-orange-500 font-semibold'
-    default: return 'text-muted-foreground'
+// dark parameter indicates if using on dark background (Kitchen page vs FOH page)
+export function getTimingClass(state: TimingState, dark = false): string {
+  if (dark) {
+    // Dark background (Kitchen page) - use lighter colors for better contrast
+    switch (state) {
+      case 'urgent': return 'text-red-400 font-bold'
+      case 'warning': return 'text-orange-400 font-semibold'
+      default: return 'text-gray-300'
+    }
+  } else {
+    // Light background (FOH page) - use darker colors for better contrast
+    switch (state) {
+      case 'urgent': return 'text-red-600 font-bold'
+      case 'warning': return 'text-orange-600 font-semibold'
+      default: return 'text-gray-600'
+    }
   }
 }
 
