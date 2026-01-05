@@ -23,6 +23,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { toast } from '@/components/ui/use-toast';
+import { useTheme } from '@/hooks/use-theme';
 import {
   Plus,
   Minus,
@@ -33,6 +34,8 @@ import {
   Clock,
   CheckCircle,
   AlertCircle,
+  Sun,
+  Moon,
 } from 'lucide-react';
 
 type OrderDraftItem = {
@@ -50,6 +53,9 @@ type TabWithOrders = Tab & {
 };
 
 export function FrontOfHouse() {
+  // Theme
+  const { theme, toggleTheme } = useTheme();
+
   // Tab state
   const [tabs, setTabs] = useState<TabWithOrders[]>([]);
   const [selectedTab, setSelectedTab] = useState<TabWithOrders | null>(null);
@@ -471,6 +477,18 @@ export function FrontOfHouse() {
       <header className='border-b p-4 flex items-center justify-between'>
         <h1 className='text-xl font-bold'>Front of House</h1>
         <div className='flex items-center gap-4'>
+          <Button
+            variant='ghost'
+            size='icon'
+            onClick={toggleTheme}
+            className='text-muted-foreground hover:text-foreground'
+          >
+            {theme === 'dark' ? (
+              <Sun className='w-4 h-4' />
+            ) : (
+              <Moon className='w-4 h-4' />
+            )}
+          </Button>
           <a
             href='#/kitchen'
             className='text-sm text-muted-foreground hover:text-foreground flex items-center gap-1'
@@ -1005,7 +1023,7 @@ export function FrontOfHouse() {
                 }))
               }
             >
-              <option value='Food'>Food</option>
+              <option value='Skewers'>Skewers</option>
               <option value='Drinks'>Drinks</option>
               <option value='Dessert'>Dessert</option>
               <option value='Other'>Other</option>

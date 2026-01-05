@@ -5,6 +5,7 @@ import type { Order, OrderItem, MenuItem, Tab } from '@/types/database';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { toast } from '@/components/ui/use-toast';
+import { useTheme } from '@/hooks/use-theme';
 import {
   Check,
   Volume2,
@@ -12,6 +13,8 @@ import {
   Home,
   AlertTriangle,
   LogOut,
+  Sun,
+  Moon,
 } from 'lucide-react';
 
 type OrderWithDetails = Order & {
@@ -25,6 +28,7 @@ export function Kitchen() {
   const [now, setNow] = useState(Date.now());
   const [audioEnabled, setAudioEnabled] = useState(false);
   const [completing, setCompleting] = useState<string | null>(null);
+  const { theme, toggleTheme } = useTheme();
 
   const audioContextRef = useRef<AudioContext | null>(null);
   const alertBufferRef = useRef<AudioBuffer | null>(null);
@@ -203,20 +207,32 @@ export function Kitchen() {
   // Use shared timing utilities with consistent 6/12 min thresholds (FR-006)
   function getElapsedClass(createdAt: string): string {
     const state = getTimingState(createdAt);
-    return getTimingClass(state, true); // true = dark background
+    return getTimingClass(state);
   }
 
   return (
-    <div className='min-h-screen bg-gray-900 text-white'>
+    <div className='min-h-screen bg-background text-foreground'>
       {/* Header */}
-      <header className='bg-gray-800 border-b border-gray-700 p-4 flex items-center justify-between'>
+      <header className='bg-card border-b p-4 flex items-center justify-between'>
         <h1 className='text-xl font-bold'>Kitchen Display</h1>
-        <div className='flex items-center gap-4 text-black'>
+        <div className='flex items-center gap-4'>
+          <Button
+            variant='ghost'
+            size='icon'
+            onClick={toggleTheme}
+            className='text-muted-foreground hover:text-foreground'
+          >
+            {theme === 'dark' ? (
+              <Sun className='w-4 h-4' />
+            ) : (
+              <Moon className='w-4 h-4' />
+            )}
+          </Button>
           <Button
             variant={audioEnabled ? 'default' : 'outline'}
             size='sm'
             onClick={toggleAudio}
-            className={audioEnabled ? 'bg-green-600 hover:bg-green-700' : ''}
+            className={audioEnabled ? 'bg-green-600 hover:bg-green-700 text-white' : ''}
           >
             {audioEnabled ? (
               <Volume2 className='w-4 h-4 mr-2' />
@@ -227,7 +243,7 @@ export function Kitchen() {
           </Button>
           <a
             href='#/'
-            className='text-sm text-gray-300 hover:text-white flex items-center gap-1'
+            className='text-sm text-muted-foreground hover:text-foreground flex items-center gap-1'
           >
             <Home className='w-4 h-4' /> Front of House
           </a>
@@ -235,7 +251,7 @@ export function Kitchen() {
             variant='ghost'
             size='sm'
             onClick={() => supabase.auth.signOut()}
-            className='text-gray-300 hover:text-white'
+            className='text-muted-foreground hover:text-foreground'
           >
             <LogOut className='w-4 h-4 mr-1' /> Sign Out
           </Button>
@@ -245,11 +261,11 @@ export function Kitchen() {
       {/* Orders Grid */}
       <div className='p-4'>
         {loading ? (
-          <div className='text-center text-gray-300 py-12'>
+          <div className='text-center text-muted-foreground py-12'>
             Loading orders...
           </div>
         ) : orders.length === 0 ? (
-          <div className='text-center text-gray-300 py-12'>
+          <div className='text-center text-muted-foreground py-12'>
             <p className='text-2xl mb-2'>No active orders</p>
             <p className='text-sm'>Orders will appear here when submitted</p>
           </div>
@@ -258,13 +274,13 @@ export function Kitchen() {
             {orders.map((order) => (
               <Card
                 key={order.id}
-                className={`bg-gray-800 border-gray-700 ${
+                className={
                   order.status === 'editing' ? 'border-yellow-500 border-2' : ''
-                }`}
+                }
               >
                 <CardHeader className='pb-2'>
                   <div className='flex items-center justify-between'>
-                    <CardTitle className='text-lg text-white'>
+                    <CardTitle className='text-lg'>
                       {order.tab.name}
                     </CardTitle>
                     <span
@@ -274,7 +290,7 @@ export function Kitchen() {
                     </span>
                   </div>
                   {order.status === 'editing' && (
-                    <div className='flex items-center gap-1 text-yellow-500 text-sm'>
+                    <div className='flex items-center gap-1 text-yellow-600 dark:text-yellow-400 text-sm'>
                       <AlertTriangle className='w-4 h-4' />
                       BEING EDITED - HOLD
                     </div>
@@ -285,15 +301,15 @@ export function Kitchen() {
                   <div className='space-y-2 mb-4'>
                     {order.order_items.map((item) => (
                       <div key={item.id} className='flex items-start gap-2'>
-                        <span className='bg-gray-700 text-white px-2 py-0.5 rounded text-sm font-mono min-w-[2rem] text-center'>
+                        <span className='bg-muted px-2 py-0.5 rounded text-sm font-mono min-w-[2rem] text-center'>
                           {item.quantity}x
                         </span>
                         <div className='flex-1'>
-                          <div className='font-medium text-white'>
+                          <div className='font-medium'>
                             {item.menu_item.name}
                           </div>
                           {item.notes && (
-                            <div className='text-sm text-yellow-400 italic'>
+                            <div className='text-sm text-accent italic'>
                               → {item.notes}
                             </div>
                           )}
@@ -304,15 +320,15 @@ export function Kitchen() {
 
                   {/* Order notes */}
                   {order.notes && (
-                    <div className='bg-gray-700 rounded p-2 mb-4 text-sm text-white'>
-                      <span className='text-gray-300 font-medium'>Note:</span>{' '}
+                    <div className='bg-muted rounded p-2 mb-4 text-sm'>
+                      <span className='text-muted-foreground font-medium'>Note:</span>{' '}
                       {order.notes}
                     </div>
                   )}
 
                   {/* Complete button */}
                   <Button
-                    className='w-full bg-green-600 hover:bg-green-700'
+                    className='w-full bg-green-600 hover:bg-green-700 text-white'
                     size='lg'
                     onClick={() => markComplete(order.id)}
                     disabled={
@@ -332,7 +348,7 @@ export function Kitchen() {
       </div>
 
       {/* Order count footer */}
-      <footer className='fixed bottom-0 left-0 right-0 bg-gray-800 border-t border-gray-700 p-3 text-center'>
+      <footer className='fixed bottom-0 left-0 right-0 bg-card border-t p-3 text-center'>
         <span className='text-lg font-semibold'>
           {orders.length} active order{orders.length !== 1 ? 's' : ''}
         </span>
