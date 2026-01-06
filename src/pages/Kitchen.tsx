@@ -214,8 +214,11 @@ export function Kitchen() {
     <div className='min-h-screen bg-background text-foreground'>
       {/* Header */}
       <header className='bg-card border-b p-4 flex items-center justify-between'>
-        <h1 className='text-xl font-bold'>Kitchen Display</h1>
-        <div className='flex items-center gap-4'>
+        <h1 className='text-xl font-bold'>
+          <span className='md:hidden'>Kitchen</span>
+          <span className='hidden md:inline'>Kitchen Display</span>
+        </h1>
+        <div className='flex items-center gap-2 md:gap-4'>
           <Button
             variant='ghost'
             size='icon'
@@ -235,25 +238,31 @@ export function Kitchen() {
             className={audioEnabled ? 'bg-green-600 hover:bg-green-700 text-white' : ''}
           >
             {audioEnabled ? (
-              <Volume2 className='w-4 h-4 mr-2' />
+              <Volume2 className='w-4 h-4' />
             ) : (
-              <VolumeX className='w-4 h-4 mr-2' />
+              <VolumeX className='w-4 h-4' />
             )}
-            {audioEnabled ? 'Disable Audio' : 'Enable Audio'}
+            <span className='ml-1 hidden md:inline'>
+              {audioEnabled ? 'Disable Audio' : 'Enable Audio'}
+            </span>
           </Button>
-          <a
-            href='#/'
-            className='text-sm text-muted-foreground hover:text-foreground flex items-center gap-1'
-          >
-            <Home className='w-4 h-4' /> Front of House
-          </a>
           <Button
             variant='ghost'
             size='sm'
+            onClick={() => (window.location.hash = '#/')}
+            className='text-muted-foreground hover:text-foreground'
+          >
+            <Home className='w-4 h-4' />
+            <span className='ml-1 hidden md:inline'>FOH</span>
+          </Button>
+          <Button
+            variant='ghost'
+            size='icon'
             onClick={() => supabase.auth.signOut()}
             className='text-muted-foreground hover:text-foreground'
           >
-            <LogOut className='w-4 h-4 mr-1' /> Sign Out
+            <LogOut className='w-4 h-4' />
+            <span className='sr-only'>Sign Out</span>
           </Button>
         </div>
       </header>

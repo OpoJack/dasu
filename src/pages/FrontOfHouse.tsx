@@ -36,6 +36,7 @@ import {
   AlertCircle,
   Sun,
   Moon,
+  Pencil,
 } from 'lucide-react';
 
 type OrderDraftItem = {
@@ -73,6 +74,9 @@ export function FrontOfHouse() {
   const [orderNotes, setOrderNotes] = useState('');
   const [submittingOrder, setSubmittingOrder] = useState(false);
 
+  // Edit order state
+  const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
+
   // Add menu item dialog
   const [showAddMenuItem, setShowAddMenuItem] = useState(false);
   const [newMenuItem, setNewMenuItem] = useState({
@@ -92,8 +96,8 @@ export function FrontOfHouse() {
     new Set()
   );
 
-  // Mobile navigation state
-  const [mobileView, setMobileView] = useState<'tabs' | 'menu' | 'closeout'>(
+  // Mobile navigation state (T011 - renamed closeout to orders)
+  const [mobileView, setMobileView] = useState<'tabs' | 'menu' | 'orders'>(
     'tabs'
   );
 
@@ -282,6 +286,12 @@ export function FrontOfHouse() {
   }
 
   async function submitOrder() {
+    // If editing, route to saveEditedOrder instead (T006)
+    if (editingOrderId) {
+      await saveEditedOrder();
+      return;
+    }
+
     if (!selectedTab || orderDraft.length === 0) return;
 
     setSubmittingOrder(true);
@@ -446,6 +456,134 @@ export function FrontOfHouse() {
     setMobileView('menu');
   }
 
+  // Start editing an existing order (T004)
+  async function startEdit(order: OrderWithDetails) {
+    // Call RPC to acquire edit lock
+    const { data: success, error } = await supabase.rpc('start_order_edit', {
+      p_order_id: order.id,
+    });
+
+    if (error) {
+      toast({
+        title: 'Error starting edit',
+        description: error.message,
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    if (!success) {
+      toast({
+        title: 'Cannot edit order',
+        description: 'Order may have been completed or is being edited',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    // Load order items into draft
+    const draftItems: OrderDraftItem[] = order.order_items.map((item) => ({
+      menuItem: item.menu_item,
+      quantity: item.quantity,
+      notes: item.notes || '',
+    }));
+
+    setEditingOrderId(order.id);
+    setOrderDraft(draftItems);
+    setOrderNotes(order.notes || '');
+
+    // On mobile, switch to menu view to show the current order
+    setMobileView('menu');
+  }
+
+  // Save edited order (T005)
+  async function saveEditedOrder() {
+    if (!editingOrderId || orderDraft.length === 0) {
+      toast({
+        title: 'Cannot save order',
+        description: 'Order must have at least one item',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setSubmittingOrder(true);
+
+    try {
+      // 1. Delete existing order items
+      const { error: deleteError } = await supabase
+        .from('order_items')
+        .delete()
+        .eq('order_id', editingOrderId);
+
+      if (deleteError) throw deleteError;
+
+      // 2. Insert new order items
+      const orderItems = orderDraft.map((d) => ({
+        order_id: editingOrderId,
+        menu_item_id: d.menuItem.id,
+        quantity: d.quantity,
+        price_at_order: d.menuItem.price,
+        notes: d.notes.trim() || null,
+      }));
+
+      const { error: insertError } = await supabase
+        .from('order_items')
+        .insert(orderItems);
+
+      if (insertError) throw insertError;
+
+      // 3. Update order notes
+      const { error: updateError } = await supabase
+        .from('orders')
+        .update({ notes: orderNotes.trim() || null })
+        .eq('id', editingOrderId);
+
+      if (updateError) throw updateError;
+
+      // 4. Release edit lock
+      const { error: finishError } = await supabase.rpc('finish_order_edit', {
+        p_order_id: editingOrderId,
+      });
+
+      if (finishError) throw finishError;
+
+      // 5. Clear state and reload
+      setEditingOrderId(null);
+      setOrderDraft([]);
+      setOrderNotes('');
+      loadTabs();
+
+      toast({ title: 'Order updated!' });
+    } catch (err) {
+      toast({
+        title: 'Error saving order',
+        description: err instanceof Error ? err.message : 'Unknown error',
+        variant: 'destructive',
+      });
+    } finally {
+      setSubmittingOrder(false);
+    }
+  }
+
+  // Cancel edit operation (T016)
+  async function cancelEdit() {
+    if (!editingOrderId) return;
+
+    // Release edit lock
+    await supabase.rpc('finish_order_edit', {
+      p_order_id: editingOrderId,
+    });
+
+    // Clear edit state
+    setEditingOrderId(null);
+    setOrderDraft([]);
+    setOrderNotes('');
+    loadTabs();
+
+    toast({ title: 'Edit cancelled' });
+  }
+
   async function closeTab() {
     if (!selectedTab) return;
 
@@ -475,8 +613,11 @@ export function FrontOfHouse() {
     <div className='min-h-screen bg-background'>
       {/* Header */}
       <header className='border-b p-4 flex items-center justify-between'>
-        <h1 className='text-xl font-bold'>Front of House</h1>
-        <div className='flex items-center gap-4'>
+        <h1 className='text-xl font-bold'>
+          <span className='md:hidden'>FOH</span>
+          <span className='hidden md:inline'>Front of House</span>
+        </h1>
+        <div className='flex items-center gap-2 md:gap-4'>
           <Button
             variant='ghost'
             size='icon'
@@ -489,19 +630,23 @@ export function FrontOfHouse() {
               <Moon className='w-4 h-4' />
             )}
           </Button>
-          <a
-            href='#/kitchen'
-            className='text-sm text-muted-foreground hover:text-foreground flex items-center gap-1'
-          >
-            <ChefHat className='w-4 h-4' /> Kitchen View
-          </a>
           <Button
             variant='ghost'
             size='sm'
-            onClick={() => supabase.auth.signOut()}
-            className='text-muted-foreground'
+            onClick={() => (window.location.hash = '#/kitchen')}
+            className='text-muted-foreground hover:text-foreground'
           >
-            <LogOut className='w-4 h-4 mr-1' /> Sign Out
+            <ChefHat className='w-4 h-4' />
+            <span className='ml-1 hidden md:inline'>Kitchen</span>
+          </Button>
+          <Button
+            variant='ghost'
+            size='icon'
+            onClick={() => supabase.auth.signOut()}
+            className='text-muted-foreground hover:text-foreground'
+          >
+            <LogOut className='w-4 h-4' />
+            <span className='sr-only'>Sign Out</span>
           </Button>
         </div>
       </header>
@@ -631,8 +776,14 @@ export function FrontOfHouse() {
         {/* Desktop Right Panel - always visible on desktop */}
         <div className='hidden md:flex md:w-80 border-l flex-col'>
           {/* Current Order */}
-          <div className='h-2/3 p-4 flex flex-col border-b'>
-            <h2 className='font-semibold mb-3'>Current Order</h2>
+          <div
+            className={`h-2/3 p-4 flex flex-col border-b ${
+              editingOrderId ? 'ring-2 ring-yellow-500' : ''
+            }`}
+          >
+            <h2 className='font-semibold mb-3'>
+              {editingOrderId ? 'Editing Order' : 'Current Order'}
+            </h2>
 
             {orderDraft.length === 0 ? (
               <p className='text-sm text-muted-foreground flex-1'>
@@ -704,15 +855,33 @@ export function FrontOfHouse() {
                   <span>Total:</span>
                   <span>${orderTotal.toFixed(2)}</span>
                 </div>
-                <Button
-                  className='w-full'
-                  size='lg'
-                  onClick={submitOrder}
-                  disabled={submittingOrder || !selectedTab}
-                >
-                  <Send className='w-4 h-4 mr-2' />
-                  {submittingOrder ? 'Sending...' : 'Send to Kitchen'}
-                </Button>
+                <div className='flex gap-2'>
+                  {editingOrderId && (
+                    <Button
+                      variant='outline'
+                      onClick={cancelEdit}
+                      className='flex-1'
+                    >
+                      <X className='w-4 h-4 mr-1' />
+                      Cancel
+                    </Button>
+                  )}
+                  <Button
+                    className={editingOrderId ? 'flex-1' : 'w-full'}
+                    size={editingOrderId ? undefined : 'lg'}
+                    onClick={submitOrder}
+                    disabled={
+                      submittingOrder || (!selectedTab && !editingOrderId)
+                    }
+                  >
+                    <Send className='w-4 h-4 mr-1' />
+                    {submittingOrder
+                      ? 'Saving...'
+                      : editingOrderId
+                      ? 'Save Changes'
+                      : 'Send to Kitchen'}
+                  </Button>
+                </div>
               </div>
             )}
           </div>
@@ -771,9 +940,30 @@ export function FrontOfHouse() {
                               ))}
                             </div>
 
-                            {/* Order subtotal */}
-                            <div className='text-right text-xs font-medium mt-1'>
-                              ${orderSubtotal.toFixed(2)}
+                            {/* Order subtotal and Edit button (T007, T020) */}
+                            <div className='flex items-center justify-between mt-1'>
+                              {order.status === 'in_progress' && (
+                                <Button
+                                  variant='ghost'
+                                  size='sm'
+                                  className='h-6 px-2 text-xs'
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    startEdit(order);
+                                  }}
+                                >
+                                  <Pencil className='w-3 h-3 mr-1' />
+                                  Edit
+                                </Button>
+                              )}
+                              {order.status === 'editing' && (
+                                <span className='text-xs text-yellow-600 italic'>
+                                  Being edited...
+                                </span>
+                              )}
+                              <div className='text-right text-xs font-medium ml-auto'>
+                                ${orderSubtotal.toFixed(2)}
+                              </div>
                             </div>
                           </CardContent>
                         </Card>
@@ -810,9 +1000,13 @@ export function FrontOfHouse() {
         <div
           className={`${
             mobileView === 'menu' ? 'flex' : 'hidden'
-          } md:hidden w-full h-1/2 flex-col border-t`}
+          } md:hidden w-full h-1/2 flex-col border-t ${
+            editingOrderId ? 'ring-2 ring-yellow-500' : ''
+          }`}
         >
-          <h2 className='p-4 pb-2 font-semibold'>Current Order</h2>
+          <h2 className='p-4 pb-2 font-semibold'>
+            {editingOrderId ? 'Editing Order' : 'Current Order'}
+          </h2>
 
           {orderDraft.length === 0 ? (
             <p className='text-sm text-muted-foreground p-4'>No items yet</p>
@@ -875,7 +1069,7 @@ export function FrontOfHouse() {
                 </div>
               </div>
 
-              {/* Sticky footer with total and submit */}
+              {/* Sticky footer with total and submit (T018) */}
               <div className='border-t p-4 bg-background space-y-3'>
                 <Input
                   placeholder='Order notes (optional)...'
@@ -886,24 +1080,42 @@ export function FrontOfHouse() {
                   <span>Total:</span>
                   <span>${orderTotal.toFixed(2)}</span>
                 </div>
-                <Button
-                  className='w-full'
-                  size='lg'
-                  onClick={submitOrder}
-                  disabled={submittingOrder || !selectedTab}
-                >
-                  <Send className='w-4 h-4 mr-2' />
-                  {submittingOrder ? 'Sending...' : 'Send to Kitchen'}
-                </Button>
+                <div className='flex gap-2'>
+                  {editingOrderId && (
+                    <Button
+                      variant='outline'
+                      onClick={cancelEdit}
+                      className='flex-1'
+                    >
+                      <X className='w-4 h-4 mr-1' />
+                      Cancel
+                    </Button>
+                  )}
+                  <Button
+                    className={editingOrderId ? 'flex-1' : 'w-full'}
+                    size={editingOrderId ? undefined : 'lg'}
+                    onClick={submitOrder}
+                    disabled={
+                      submittingOrder || (!selectedTab && !editingOrderId)
+                    }
+                  >
+                    <Send className='w-4 h-4 mr-1' />
+                    {submittingOrder
+                      ? 'Saving...'
+                      : editingOrderId
+                      ? 'Save Changes'
+                      : 'Send to Kitchen'}
+                  </Button>
+                </div>
               </div>
             </>
           )}
         </div>
 
-        {/* Mobile Tab Orders - shown when viewing closeout */}
+        {/* Mobile Tab Orders - shown when viewing orders (T013) */}
         <div
           className={`${
-            mobileView === 'closeout' ? 'flex' : 'hidden'
+            mobileView === 'orders' ? 'flex' : 'hidden'
           } md:hidden w-full flex-col bg-muted/30`}
         >
           <h2 className='p-4 pb-2 font-semibold'>Tab Orders</h2>
@@ -956,8 +1168,30 @@ export function FrontOfHouse() {
                             ))}
                           </div>
 
-                          <div className='text-right text-xs font-medium mt-1'>
-                            ${orderSubtotal.toFixed(2)}
+                          {/* Order subtotal and Edit button (T014, T020) */}
+                          <div className='flex items-center justify-between mt-1'>
+                            {order.status === 'in_progress' && (
+                              <Button
+                                variant='ghost'
+                                size='sm'
+                                className='h-6 px-2 text-xs'
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  startEdit(order);
+                                }}
+                              >
+                                <Pencil className='w-3 h-3 mr-1' />
+                                Edit
+                              </Button>
+                            )}
+                            {order.status === 'editing' && (
+                              <span className='text-xs text-yellow-600 italic'>
+                                Being edited...
+                              </span>
+                            )}
+                            <div className='text-right text-xs font-medium ml-auto'>
+                              ${orderSubtotal.toFixed(2)}
+                            </div>
                           </div>
                         </CardContent>
                       </Card>
@@ -1062,14 +1296,14 @@ export function FrontOfHouse() {
             Menu
           </button>
           <button
-            onClick={() => setMobileView('closeout')}
+            onClick={() => setMobileView('orders')}
             className={`flex-1 py-3 text-sm font-medium transition-colors ${
-              mobileView === 'closeout'
+              mobileView === 'orders'
                 ? 'text-primary border-t-2 border-primary'
                 : 'text-muted-foreground hover:text-foreground'
             }`}
           >
-            Close out
+            Orders
           </button>
         </div>
       </nav>
