@@ -169,6 +169,10 @@ export type Database = {
         Args: { p_tab_id: string }
         Returns: boolean
       }
+      delete_tab: {
+        Args: { p_tab_id: string }
+        Returns: boolean
+      }
     }
     Enums: {
       [_ in never]: never

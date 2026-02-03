@@ -22,6 +22,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import { BottomSheet } from '@/components/ui/bottom-sheet';
 import { toast } from '@/components/ui/use-toast';
 import { useTheme } from '@/hooks/use-theme';
 import {
@@ -37,6 +38,7 @@ import {
   Sun,
   Moon,
   Pencil,
+  Trash2,
 } from 'lucide-react';
 
 type OrderDraftItem = {
@@ -69,10 +71,56 @@ export function FrontOfHouse() {
     Record<string, MenuItem[]>
   >({});
 
-  // Order draft state
-  const [orderDraft, setOrderDraft] = useState<OrderDraftItem[]>([]);
-  const [orderNotes, setOrderNotes] = useState('');
+  // Order draft state - stored per tab
+  const [orderDraftsByTab, setOrderDraftsByTab] = useState<
+    Record<string, OrderDraftItem[]>
+  >({});
+  const [orderNotesByTab, setOrderNotesByTab] = useState<
+    Record<string, string>
+  >({});
   const [submittingOrder, setSubmittingOrder] = useState(false);
+
+  // Derived: current tab's draft and notes
+  const orderDraft = selectedTab ? orderDraftsByTab[selectedTab.id] || [] : [];
+  const orderNotes = selectedTab ? orderNotesByTab[selectedTab.id] || '' : '';
+
+  // Helper to update the current tab's draft
+  function setOrderDraft(
+    updater: OrderDraftItem[] | ((prev: OrderDraftItem[]) => OrderDraftItem[]),
+  ) {
+    if (!selectedTab) return;
+    setOrderDraftsByTab((prev) => ({
+      ...prev,
+      [selectedTab.id]:
+        typeof updater === 'function'
+          ? updater(prev[selectedTab.id] || [])
+          : updater,
+    }));
+  }
+
+  // Helper to update the current tab's notes
+  function setOrderNotes(notes: string) {
+    if (!selectedTab) return;
+    setOrderNotesByTab((prev) => ({
+      ...prev,
+      [selectedTab.id]: notes,
+    }));
+  }
+
+  // Helper to clear the current tab's draft
+  function clearCurrentDraft() {
+    if (!selectedTab) return;
+    setOrderDraftsByTab((prev) => {
+      const next = { ...prev };
+      delete next[selectedTab.id];
+      return next;
+    });
+    setOrderNotesByTab((prev) => {
+      const next = { ...prev };
+      delete next[selectedTab.id];
+      return next;
+    });
+  }
 
   // Edit order state
   const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
@@ -88,18 +136,24 @@ export function FrontOfHouse() {
   // Close tab confirmation
   const [showCloseConfirm, setShowCloseConfirm] = useState(false);
 
+  // Delete tab confirmation
+  const [tabToDelete, setTabToDelete] = useState<TabWithOrders | null>(null);
+
   // Timer for updating elapsed time (FR-008)
   const [now, setNow] = useState(Date.now());
 
   // Track acknowledged order completions (for "ready" badge)
   const [acknowledgedOrders, setAcknowledgedOrders] = useState<Set<string>>(
-    new Set()
+    new Set(),
   );
 
   // Mobile navigation state (T011 - renamed closeout to orders)
   const [mobileView, setMobileView] = useState<'tabs' | 'menu' | 'orders'>(
-    'tabs'
+    'tabs',
   );
+
+  // Mobile bottom sheet state for current order
+  const [orderSheetOpen, setOrderSheetOpen] = useState(false);
 
   // Ref to track selected tab ID for use in subscription callback
   const selectedTabIdRef = useRef<string | null>(null);
@@ -130,7 +184,7 @@ export function FrontOfHouse() {
             setAcknowledgedOrders((prev) => new Set(prev).add(order.id));
           }
           loadTabs(); // Refresh tabs to update order status
-        }
+        },
       )
       .subscribe();
 
@@ -147,11 +201,14 @@ export function FrontOfHouse() {
 
   // Update menuByCategory when menuItems change
   useEffect(() => {
-    const grouped = menuItems.reduce((acc, item) => {
-      if (!acc[item.category]) acc[item.category] = [];
-      acc[item.category].push(item);
-      return acc;
-    }, {} as Record<string, MenuItem[]>);
+    const grouped = menuItems.reduce(
+      (acc, item) => {
+        if (!acc[item.category]) acc[item.category] = [];
+        acc[item.category].push(item);
+        return acc;
+      },
+      {} as Record<string, MenuItem[]>,
+    );
     setMenuByCategory(grouped);
   }, [menuItems]);
 
@@ -178,7 +235,7 @@ export function FrontOfHouse() {
             menu_item:menu_items (*)
           )
         )
-      `
+      `,
       )
       .eq('status', 'open')
       .order('created_at', { ascending: false });
@@ -254,11 +311,17 @@ export function FrontOfHouse() {
       const existing = prev.find((d) => d.menuItem.id === item.id);
       if (existing) {
         return prev.map((d) =>
-          d.menuItem.id === item.id ? { ...d, quantity: d.quantity + 1 } : d
+          d.menuItem.id === item.id ? { ...d, quantity: d.quantity + 1 } : d,
         );
       }
       return [...prev, { menuItem: item, quantity: 1, notes: '' }];
     });
+
+    // On mobile, briefly expand sheet to show item was added
+    if (window.innerWidth < 768 && !orderSheetOpen) {
+      setOrderSheetOpen(true);
+      setTimeout(() => setOrderSheetOpen(false), 1500);
+    }
   }
 
   function updateQuantity(itemId: string, delta: number) {
@@ -277,7 +340,7 @@ export function FrontOfHouse() {
 
   function updateItemNotes(itemId: string, notes: string) {
     setOrderDraft((prev) =>
-      prev.map((d) => (d.menuItem.id === itemId ? { ...d, notes } : d))
+      prev.map((d) => (d.menuItem.id === itemId ? { ...d, notes } : d)),
     );
   }
 
@@ -340,13 +403,14 @@ export function FrontOfHouse() {
       return;
     }
 
-    // Clear draft and reload tabs
-    setOrderDraft([]);
-    setOrderNotes('');
+    // Clear draft, close sheet, and reload tabs
+    const itemCount = orderDraft.length;
+    clearCurrentDraft();
+    setOrderSheetOpen(false);
     loadTabs();
     toast({
       title: 'Order sent to kitchen!',
-      description: `${orderDraft.length} items submitted`,
+      description: `${itemCount} items submitted`,
     });
   }
 
@@ -384,7 +448,7 @@ export function FrontOfHouse() {
 
   const orderTotal = orderDraft.reduce(
     (sum, d) => sum + d.menuItem.price * d.quantity,
-    0
+    0,
   );
 
   // Calculate tab total from all orders (FR-002)
@@ -394,9 +458,9 @@ export function FrontOfHouse() {
         total +
         order.order_items.reduce(
           (orderSum, item) => orderSum + item.quantity * item.price_at_order,
-          0
+          0,
         ),
-      0
+      0,
     );
   }
 
@@ -404,7 +468,7 @@ export function FrontOfHouse() {
   function calculateOrderSubtotal(order: OrderWithDetails): number {
     return order.order_items.reduce(
       (sum, item) => sum + item.quantity * item.price_at_order,
-      0
+      0,
     );
   }
 
@@ -435,12 +499,27 @@ export function FrontOfHouse() {
   // Count unacknowledged ready orders for a tab
   function getReadyCount(tab: TabWithOrders): number {
     return tab.orders.filter(
-      (o) => o.status === 'complete' && !acknowledgedOrders.has(o.id)
+      (o) => o.status === 'complete' && !acknowledgedOrders.has(o.id),
     ).length;
   }
 
   // Select tab and acknowledge its completed orders
   function selectTab(tab: TabWithOrders) {
+    // If switching to a different tab, clear the current order draft
+    if (selectedTab?.id !== tab.id) {
+      // Cancel any active edit first (releases lock) - edits are tied to specific orders
+      if (editingOrderId) {
+        supabase.rpc('finish_order_edit', { p_order_id: editingOrderId });
+        setEditingOrderId(null);
+        toast({
+          title: 'Edit cancelled',
+          description: 'Switched to another tab',
+        });
+      }
+      // Close the sheet when switching tabs
+      setOrderSheetOpen(false);
+    }
+
     setSelectedTab(tab);
     const completeOrderIds = tab.orders
       .filter((o) => o.status === 'complete')
@@ -492,8 +571,9 @@ export function FrontOfHouse() {
     setOrderDraft(draftItems);
     setOrderNotes(order.notes || '');
 
-    // On mobile, switch to menu view to show the current order
+    // On mobile, switch to menu view and open the order sheet
     setMobileView('menu');
+    setOrderSheetOpen(true);
   }
 
   // Save edited order (T005)
@@ -548,10 +628,10 @@ export function FrontOfHouse() {
 
       if (finishError) throw finishError;
 
-      // 5. Clear state and reload
+      // 5. Clear state, close sheet, and reload
       setEditingOrderId(null);
-      setOrderDraft([]);
-      setOrderNotes('');
+      clearCurrentDraft();
+      setOrderSheetOpen(false);
       loadTabs();
 
       toast({ title: 'Order updated!' });
@@ -575,10 +655,10 @@ export function FrontOfHouse() {
       p_order_id: editingOrderId,
     });
 
-    // Clear edit state
+    // Clear edit state and close sheet
     setEditingOrderId(null);
-    setOrderDraft([]);
-    setOrderNotes('');
+    clearCurrentDraft();
+    setOrderSheetOpen(false);
     loadTabs();
 
     toast({ title: 'Edit cancelled' });
@@ -600,12 +680,64 @@ export function FrontOfHouse() {
       return;
     }
 
+    // Clean up draft for the closed tab
+    const closedTabId = selectedTab.id;
+    const closedTabName = selectedTab.name;
+    setOrderDraftsByTab((prev) => {
+      const next = { ...prev };
+      delete next[closedTabId];
+      return next;
+    });
+    setOrderNotesByTab((prev) => {
+      const next = { ...prev };
+      delete next[closedTabId];
+      return next;
+    });
+
     setSelectedTab(null);
     setShowCloseConfirm(false);
     loadTabs();
     toast({
       title: 'Tab closed',
-      description: `${selectedTab.name} has been closed`,
+      description: `${closedTabName} has been closed`,
+    });
+  }
+
+  async function deleteTab(tab: TabWithOrders) {
+    // Delete the tab using RPC (bypasses RLS, handles cascade)
+    const { error } = await supabase.rpc('delete_tab', { p_tab_id: tab.id });
+
+    if (error) {
+      toast({
+        title: 'Error deleting tab',
+        description: error.message,
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    // Clean up draft for the deleted tab
+    setOrderDraftsByTab((prev) => {
+      const next = { ...prev };
+      delete next[tab.id];
+      return next;
+    });
+    setOrderNotesByTab((prev) => {
+      const next = { ...prev };
+      delete next[tab.id];
+      return next;
+    });
+
+    // If this was the selected tab, deselect it
+    if (selectedTab?.id === tab.id) {
+      setSelectedTab(null);
+    }
+
+    setTabToDelete(null);
+    loadTabs();
+    toast({
+      title: 'Tab deleted',
+      description: `${tab.name} has been deleted`,
     });
   }
 
@@ -693,16 +825,29 @@ export function FrontOfHouse() {
                 >
                   <CardContent className='p-3'>
                     <div className='flex items-center justify-between'>
-                      <div className='flex items-center gap-2'>
-                        <span className='font-medium'>{tab.name}</span>
+                      <div className='flex items-center gap-2 min-w-0 flex-1'>
+                        <span className='font-medium truncate'>{tab.name}</span>
                         {readyCount > 0 && (
-                          <span className='px-1.5 py-0.5 text-xs font-semibold bg-green-500 text-white rounded-full'>
+                          <span className='px-1.5 py-0.5 text-xs font-semibold bg-green-500 text-white rounded-full flex-shrink-0'>
                             {readyCount} ready
                           </span>
                         )}
                       </div>
-                      <div className='font-semibold text-sm'>
-                        ${tabTotal.toFixed(2)}
+                      <div className='flex items-center gap-2 flex-shrink-0'>
+                        <span className='font-semibold text-sm'>
+                          ${tabTotal.toFixed(2)}
+                        </span>
+                        <Button
+                          variant='ghost'
+                          size='icon'
+                          className='h-6 w-6 text-muted-foreground hover:text-destructive'
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setTabToDelete(tab);
+                          }}
+                        >
+                          <Trash2 className='w-3.5 h-3.5' />
+                        </Button>
                       </div>
                     </div>
                     <div className='text-xs text-muted-foreground'>
@@ -720,7 +865,7 @@ export function FrontOfHouse() {
         <div
           className={`${
             mobileView === 'menu' ? 'flex' : 'hidden'
-          } md:flex flex-1 p-4 overflow-y-auto flex-col`}
+          } md:flex flex-1 p-4 overflow-y-auto flex-col pb-32 md:pb-4`}
         >
           {selectedTab ? (
             <>
@@ -731,7 +876,7 @@ export function FrontOfHouse() {
                   size='sm'
                   onClick={() => setShowAddMenuItem(true)}
                 >
-                  <Plus className='w-4 h-4 mr-1' /> Add Item
+                  <Plus className='w-4 h-4 mr-1' /> New menu item
                 </Button>
               </div>
 
@@ -741,15 +886,15 @@ export function FrontOfHouse() {
                   <h3 className='text-sm font-medium text-muted-foreground mb-2'>
                     {category}
                   </h3>
-                  <div className='grid grid-cols-2 md:grid-cols-2 lg:grid-cols-4 gap-2'>
+                  <div className='grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-4 gap-3'>
                     {items.map((item) => (
                       <Card
                         key={item.id}
-                        className='cursor-pointer hover:bg-accent/50 transition-colors min-w-20'
+                        className='cursor-pointer hover:bg-accent/50 active:scale-95 transition-all min-h-16'
                         onClick={() => addToOrder(item)}
                       >
-                        <CardContent className='p-3 wrap-break-word'>
-                          <div className='font-medium text-sm'>{item.name}</div>
+                        <CardContent className='p-4 break-words'>
+                          <div className='font-medium'>{item.name}</div>
                           <div className='text-sm text-muted-foreground'>
                             ${item.price.toFixed(2)}
                           </div>
@@ -878,8 +1023,8 @@ export function FrontOfHouse() {
                     {submittingOrder
                       ? 'Saving...'
                       : editingOrderId
-                      ? 'Save Changes'
-                      : 'Send to Kitchen'}
+                        ? 'Save Changes'
+                        : 'Send to Kitchen'}
                   </Button>
                 </div>
               </div>
@@ -996,121 +1141,186 @@ export function FrontOfHouse() {
           </div>
         </div>
 
-        {/* Mobile Current Order - shown when viewing menu */}
-        <div
-          className={`${
-            mobileView === 'menu' ? 'flex' : 'hidden'
-          } md:hidden w-full h-1/2 flex-col border-t ${
-            editingOrderId ? 'ring-2 ring-yellow-500' : ''
-          }`}
-        >
-          <h2 className='p-4 pb-2 font-semibold'>
-            {editingOrderId ? 'Editing Order' : 'Current Order'}
-          </h2>
-
-          {orderDraft.length === 0 ? (
-            <p className='text-sm text-muted-foreground p-4'>No items yet</p>
-          ) : (
-            <>
-              {/* Scrollable order items */}
-              <div className='flex-1 overflow-y-auto px-4'>
-                <div className='space-y-3 pb-4'>
-                  {orderDraft.map((item) => (
-                    <Card key={item.menuItem.id}>
-                      <CardContent className='p-3'>
-                        <div className='flex items-center justify-between mb-2'>
-                          <span className='font-medium'>
-                            {item.menuItem.name}
-                          </span>
-                          <Button
-                            variant='ghost'
-                            size='icon'
-                            className='h-6 w-6'
-                            onClick={() => removeFromOrder(item.menuItem.id)}
-                          >
-                            <X className='w-3 h-3' />
-                          </Button>
-                        </div>
-                        <div className='flex items-center gap-2 mb-2'>
-                          <Button
-                            variant='outline'
-                            size='icon'
-                            className='h-7 w-7'
-                            onClick={() => updateQuantity(item.menuItem.id, -1)}
-                          >
-                            <Minus className='w-3 h-3' />
-                          </Button>
-                          <span className='w-8 text-center'>
-                            {item.quantity}
-                          </span>
-                          <Button
-                            variant='outline'
-                            size='icon'
-                            className='h-7 w-7'
-                            onClick={() => updateQuantity(item.menuItem.id, 1)}
-                          >
-                            <Plus className='w-3 h-3' />
-                          </Button>
-                          <span className='ml-auto text-sm'>
-                            ${(item.menuItem.price * item.quantity).toFixed(2)}
-                          </span>
-                        </div>
-                        <Input
-                          placeholder='Special requests...'
-                          value={item.notes}
-                          onChange={(e) =>
-                            updateItemNotes(item.menuItem.id, e.target.value)
-                          }
-                          className='text-sm h-8'
-                        />
-                      </CardContent>
-                    </Card>
-                  ))}
-                </div>
-              </div>
-
-              {/* Sticky footer with total and submit (T018) */}
-              <div className='border-t p-4 bg-background space-y-3'>
-                <Input
-                  placeholder='Order notes (optional)...'
-                  value={orderNotes}
-                  onChange={(e) => setOrderNotes(e.target.value)}
-                />
-                <div className='flex items-center justify-between text-lg font-semibold'>
-                  <span>Total:</span>
-                  <span>${orderTotal.toFixed(2)}</span>
-                </div>
-                <div className='flex gap-2'>
-                  {editingOrderId && (
+        {/* Mobile Current Order - Bottom Sheet (only shown when viewing menu) */}
+        {mobileView === 'menu' && selectedTab && (
+          <BottomSheet
+            isOpen={orderSheetOpen}
+            onOpenChange={setOrderSheetOpen}
+            className={`md:hidden ${editingOrderId ? 'ring-2 ring-yellow-500' : ''}`}
+            peekContent={
+              /* Collapsed state: summary bar */
+              <div className='flex items-center justify-between px-4 h-full'>
+                {orderDraft.length === 0 ? (
+                  <span className='text-sm text-muted-foreground'>
+                    Tap items to build your order
+                  </span>
+                ) : (
+                  <>
+                    <div className='flex items-center gap-3'>
+                      <span className='bg-primary text-primary-foreground text-sm font-semibold px-2 py-0.5 rounded-full'>
+                        {orderDraft.reduce((sum, d) => sum + d.quantity, 0)}
+                      </span>
+                      <span className='font-semibold'>
+                        ${orderTotal.toFixed(2)}
+                      </span>
+                      {editingOrderId && (
+                        <span className='text-xs text-yellow-600 font-medium'>
+                          Editing
+                        </span>
+                      )}
+                    </div>
                     <Button
-                      variant='outline'
-                      onClick={cancelEdit}
-                      className='flex-1'
+                      size='sm'
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        submitOrder();
+                      }}
+                      disabled={
+                        submittingOrder || (!selectedTab && !editingOrderId)
+                      }
                     >
-                      <X className='w-4 h-4 mr-1' />
-                      Cancel
+                      <Send className='w-4 h-4 mr-1' />
+                      {submittingOrder
+                        ? 'Saving...'
+                        : editingOrderId
+                          ? 'Save'
+                          : 'Send'}
                     </Button>
-                  )}
-                  <Button
-                    className={editingOrderId ? 'flex-1' : 'w-full'}
-                    size={editingOrderId ? undefined : 'lg'}
-                    onClick={submitOrder}
-                    disabled={
-                      submittingOrder || (!selectedTab && !editingOrderId)
-                    }
-                  >
-                    <Send className='w-4 h-4 mr-1' />
-                    {submittingOrder
-                      ? 'Saving...'
-                      : editingOrderId
-                      ? 'Save Changes'
-                      : 'Send to Kitchen'}
-                  </Button>
-                </div>
+                  </>
+                )}
               </div>
-            </>
-          )}
-        </div>
+            }
+            expandedContent={
+              /* Expanded state: full order details */
+              <div className='flex flex-col h-full'>
+                <div className='px-4 pb-2'>
+                  <h2 className='font-semibold'>
+                    {editingOrderId ? 'Editing Order' : 'Current Order'}
+                  </h2>
+                </div>
+
+                {orderDraft.length === 0 ? (
+                  <p className='text-sm text-muted-foreground px-4'>
+                    No items yet
+                  </p>
+                ) : (
+                  <>
+                    {/* Scrollable order items */}
+                    <div className='flex-1 overflow-y-auto px-4'>
+                      <div className='space-y-3 pb-4'>
+                        {orderDraft.map((item) => (
+                          <Card key={item.menuItem.id}>
+                            <CardContent className='p-3'>
+                              <div className='flex items-center justify-between mb-2'>
+                                <span className='font-medium'>
+                                  {item.menuItem.name}
+                                </span>
+                                <Button
+                                  variant='ghost'
+                                  size='icon'
+                                  className='h-8 w-8'
+                                  onClick={() =>
+                                    removeFromOrder(item.menuItem.id)
+                                  }
+                                >
+                                  <X className='w-4 h-4' />
+                                </Button>
+                              </div>
+                              <div className='flex items-center gap-3 mb-2'>
+                                <Button
+                                  variant='outline'
+                                  size='icon'
+                                  className='h-10 w-10'
+                                  onClick={() =>
+                                    updateQuantity(item.menuItem.id, -1)
+                                  }
+                                >
+                                  <Minus className='w-4 h-4' />
+                                </Button>
+                                <span className='w-8 text-center text-lg font-medium'>
+                                  {item.quantity}
+                                </span>
+                                <Button
+                                  variant='outline'
+                                  size='icon'
+                                  className='h-10 w-10'
+                                  onClick={() =>
+                                    updateQuantity(item.menuItem.id, 1)
+                                  }
+                                >
+                                  <Plus className='w-4 h-4' />
+                                </Button>
+                                <span className='ml-auto font-medium'>
+                                  $
+                                  {(
+                                    item.menuItem.price * item.quantity
+                                  ).toFixed(2)}
+                                </span>
+                              </div>
+                              <Input
+                                placeholder='Special requests...'
+                                value={item.notes}
+                                onChange={(e) =>
+                                  updateItemNotes(
+                                    item.menuItem.id,
+                                    e.target.value,
+                                  )
+                                }
+                                className='text-sm h-10'
+                              />
+                            </CardContent>
+                          </Card>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Sticky footer with total and submit */}
+                    <div className='border-t p-4 bg-background space-y-3'>
+                      <Input
+                        placeholder='Order notes (optional)...'
+                        value={orderNotes}
+                        onChange={(e) => setOrderNotes(e.target.value)}
+                        className='h-10'
+                      />
+                      <div className='flex items-center justify-between text-lg font-semibold'>
+                        <span>Total:</span>
+                        <span>${orderTotal.toFixed(2)}</span>
+                      </div>
+                      <div className='flex gap-2'>
+                        {editingOrderId && (
+                          <Button
+                            variant='outline'
+                            onClick={cancelEdit}
+                            className='flex-1 h-12'
+                          >
+                            <X className='w-4 h-4 mr-1' />
+                            Cancel
+                          </Button>
+                        )}
+                        <Button
+                          className={
+                            editingOrderId ? 'flex-1 h-12' : 'w-full h-12'
+                          }
+                          onClick={submitOrder}
+                          disabled={
+                            submittingOrder || (!selectedTab && !editingOrderId)
+                          }
+                        >
+                          <Send className='w-4 h-4 mr-1' />
+                          {submittingOrder
+                            ? 'Saving...'
+                            : editingOrderId
+                              ? 'Save Changes'
+                              : 'Send to Kitchen'}
+                        </Button>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+            }
+          />
+        )}
 
         {/* Mobile Tab Orders - shown when viewing orders (T013) */}
         <div
@@ -1267,7 +1477,7 @@ export function FrontOfHouse() {
             <Button variant='outline' onClick={() => setShowAddMenuItem(false)}>
               Cancel
             </Button>
-            <Button onClick={addMenuItem}>Add Item</Button>
+            <Button onClick={addMenuItem}>New menu item</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1333,6 +1543,40 @@ export function FrontOfHouse() {
               className='bg-destructive text-destructive-foreground hover:bg-destructive/90'
             >
               Close Tab
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Delete Tab Confirmation Dialog */}
+      <AlertDialog open={!!tabToDelete} onOpenChange={(open) => !open && setTabToDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Tab?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {tabToDelete && (
+                <>
+                  Are you sure you want to delete "{tabToDelete.name}"?
+                  {tabToDelete.orders.length > 0 && (
+                    <span className='block mt-2 text-yellow-600 font-medium'>
+                      Warning: This will permanently delete {tabToDelete.orders.length} order
+                      {tabToDelete.orders.length !== 1 ? 's' : ''}.
+                    </span>
+                  )}
+                  <span className='block mt-2 text-muted-foreground'>
+                    This action cannot be undone.
+                  </span>
+                </>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => tabToDelete && deleteTab(tabToDelete)}
+              className='bg-destructive text-destructive-foreground hover:bg-destructive/90'
+            >
+              Delete Tab
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
