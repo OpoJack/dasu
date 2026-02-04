@@ -15,11 +15,12 @@ import {
   LogOut,
   Sun,
   Moon,
+  XCircle,
 } from 'lucide-react';
 
 type OrderWithDetails = Order & {
   order_items: (OrderItem & { menu_item: MenuItem })[];
-  tab: Tab;
+  tab: Tab | null;
 };
 
 export function Kitchen() {
@@ -28,6 +29,7 @@ export function Kitchen() {
   const [now, setNow] = useState(Date.now());
   const [audioEnabled, setAudioEnabled] = useState(false);
   const [completing, setCompleting] = useState<string | null>(null);
+  const [dismissing, setDismissing] = useState<string | null>(null);
   const { theme, toggleTheme } = useTheme();
 
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -81,7 +83,7 @@ export function Kitchen() {
         )
       `
       )
-      .in('status', ['in_progress', 'editing'])
+      .in('status', ['in_progress', 'editing', 'cancelled'])
       .order('created_at', { ascending: true });
 
     setLoading(false);
@@ -204,6 +206,29 @@ export function Kitchen() {
     toast({ title: 'Order completed!' });
   }
 
+  async function dismissCancelled(orderId: string) {
+    setDismissing(orderId);
+
+    const { error } = await supabase.rpc('dismiss_cancelled_order', {
+      p_order_id: orderId,
+    });
+
+    setDismissing(null);
+
+    if (error) {
+      toast({
+        title: 'Error dismissing order',
+        description: error.message,
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    // Remove from list immediately
+    setOrders((prev) => prev.filter((o) => o.id !== orderId));
+    toast({ title: 'Cancelled order dismissed' });
+  }
+
   // Use shared timing utilities with consistent 6/12 min thresholds (FR-006)
   function getElapsedClass(createdAt: string): string {
     const state = getTimingState(createdAt);
@@ -284,20 +309,30 @@ export function Kitchen() {
               <Card
                 key={order.id}
                 className={
-                  order.status === 'editing' ? 'border-yellow-500 border-2' : ''
+                  order.status === 'cancelled'
+                    ? 'border-red-500 border-2 opacity-75'
+                    : order.status === 'editing'
+                    ? 'border-yellow-500 border-2'
+                    : ''
                 }
               >
                 <CardHeader className='pb-2'>
                   <div className='flex items-center justify-between'>
-                    <CardTitle className='text-lg'>
-                      {order.tab.name}
+                    <CardTitle className={`text-lg ${order.status === 'cancelled' ? 'line-through text-muted-foreground' : ''}`}>
+                      {order.tab?.name || 'Deleted Tab'}
                     </CardTitle>
                     <span
-                      className={`text-sm ${getElapsedClass(order.created_at)}`}
+                      className={`text-sm ${order.status === 'cancelled' ? 'text-muted-foreground' : getElapsedClass(order.created_at)}`}
                     >
                       {formatElapsed(order.created_at, now)}
                     </span>
                   </div>
+                  {order.status === 'cancelled' && (
+                    <div className='flex items-center gap-1 text-red-600 dark:text-red-400 text-sm font-semibold'>
+                      <XCircle className='w-4 h-4' />
+                      CANCELLED - Tab was deleted
+                    </div>
+                  )}
                   {order.status === 'editing' && (
                     <div className='flex items-center gap-1 text-yellow-600 dark:text-yellow-400 text-sm'>
                       <AlertTriangle className='w-4 h-4' />
@@ -307,14 +342,14 @@ export function Kitchen() {
                 </CardHeader>
                 <CardContent>
                   {/* Order items */}
-                  <div className='space-y-2 mb-4'>
+                  <div className={`space-y-2 mb-4 ${order.status === 'cancelled' ? 'opacity-60' : ''}`}>
                     {order.order_items.map((item) => (
                       <div key={item.id} className='flex items-start gap-2'>
                         <span className='bg-muted px-2 py-0.5 rounded text-sm font-mono min-w-[2rem] text-center'>
                           {item.quantity}x
                         </span>
                         <div className='flex-1'>
-                          <div className='font-medium'>
+                          <div className={`font-medium ${order.status === 'cancelled' ? 'line-through' : ''}`}>
                             {item.menu_item.name}
                           </div>
                           {item.notes && (
@@ -335,20 +370,33 @@ export function Kitchen() {
                     </div>
                   )}
 
-                  {/* Complete button */}
-                  <Button
-                    className='w-full bg-green-600 hover:bg-green-700 text-white'
-                    size='lg'
-                    onClick={() => markComplete(order.id)}
-                    disabled={
-                      completing === order.id || order.status === 'editing'
-                    }
-                  >
-                    <Check className='w-5 h-5 mr-2' />
-                    {completing === order.id
-                      ? 'Completing...'
-                      : 'Mark Complete'}
-                  </Button>
+                  {/* Action button - different for cancelled orders */}
+                  {order.status === 'cancelled' ? (
+                    <Button
+                      className='w-full'
+                      variant='destructive'
+                      size='lg'
+                      onClick={() => dismissCancelled(order.id)}
+                      disabled={dismissing === order.id}
+                    >
+                      <XCircle className='w-5 h-5 mr-2' />
+                      {dismissing === order.id ? 'Dismissing...' : 'Dismiss'}
+                    </Button>
+                  ) : (
+                    <Button
+                      className='w-full bg-green-600 hover:bg-green-700 text-white'
+                      size='lg'
+                      onClick={() => markComplete(order.id)}
+                      disabled={
+                        completing === order.id || order.status === 'editing'
+                      }
+                    >
+                      <Check className='w-5 h-5 mr-2' />
+                      {completing === order.id
+                        ? 'Completing...'
+                        : 'Mark Complete'}
+                    </Button>
+                  )}
                 </CardContent>
               </Card>
             ))}
@@ -359,7 +407,13 @@ export function Kitchen() {
       {/* Order count footer */}
       <footer className='fixed bottom-0 left-0 right-0 bg-card border-t p-3 text-center'>
         <span className='text-lg font-semibold'>
-          {orders.length} active order{orders.length !== 1 ? 's' : ''}
+          {orders.filter(o => o.status !== 'cancelled').length} active order
+          {orders.filter(o => o.status !== 'cancelled').length !== 1 ? 's' : ''}
+          {orders.filter(o => o.status === 'cancelled').length > 0 && (
+            <span className='text-red-500 ml-2'>
+              ({orders.filter(o => o.status === 'cancelled').length} cancelled)
+            </span>
+          )}
         </span>
       </footer>
     </div>

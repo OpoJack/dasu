@@ -66,8 +66,8 @@ export type Database = {
       orders: {
         Row: {
           id: string
-          tab_id: string
-          status: 'in_progress' | 'editing' | 'complete'
+          tab_id: string | null
+          status: 'in_progress' | 'editing' | 'complete' | 'cancelled'
           edited_by: string | null
           notes: string | null
           created_at: string
@@ -76,7 +76,7 @@ export type Database = {
         Insert: {
           id?: string
           tab_id: string
-          status?: 'in_progress' | 'editing' | 'complete'
+          status?: 'in_progress' | 'editing' | 'complete' | 'cancelled'
           edited_by?: string | null
           notes?: string | null
           created_at?: string
@@ -84,8 +84,8 @@ export type Database = {
         }
         Update: {
           id?: string
-          tab_id?: string
-          status?: 'in_progress' | 'editing' | 'complete'
+          tab_id?: string | null
+          status?: 'in_progress' | 'editing' | 'complete' | 'cancelled'
           edited_by?: string | null
           notes?: string | null
           created_at?: string
@@ -171,6 +171,10 @@ export type Database = {
       }
       delete_tab: {
         Args: { p_tab_id: string }
+        Returns: boolean
+      }
+      dismiss_cancelled_order: {
+        Args: { p_order_id: string }
         Returns: boolean
       }
     }
